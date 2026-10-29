@@ -48,9 +48,10 @@ export function createApp(cfg: Config, options: AppOptions = {}): express.Expres
   app.use((req, res, next) => {
     res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
     const started = Date.now();
-    // Paths only: query strings carry OAuth codes and state.
+    // Captured now: mounted routers rewrite req.path. Paths only: query strings carry OAuth codes and state.
+    const path = req.path;
     res.on('finish', () => {
-      if (req.path !== '/healthz') log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - started}ms ${req.ip ?? ''}`);
+      if (path !== '/healthz') log(`${req.method} ${path} ${res.statusCode} ${Date.now() - started}ms ${req.ip ?? ''}`);
     });
     next();
   });

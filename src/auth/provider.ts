@@ -138,6 +138,7 @@ export class GoogleProxyOAuthProvider implements OAuthServerProvider {
   ): OAuthClientInformationFull {
     const rejected = metadata.redirect_uris.filter((uri) => !this.isAllowedRedirectUri(uri));
     if (rejected.length > 0) {
+      this.log(`oauth: refused registration of "${metadata.client_name ?? 'unnamed'}" for redirect_uri ${rejected.join(', ')}`);
       throw new InvalidClientMetadataError(
         `redirect_uri not allowed on this server: ${rejected.join(', ')}. ` +
           'Allowed: Claude (claude.ai / claude.com), loopback http URLs, and EXTRA_REDIRECT_URIS.',

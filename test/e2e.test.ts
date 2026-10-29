@@ -605,6 +605,8 @@ describe('tools', () => {
 
   test('tool calls are logged without tokens', () => {
     assert.ok(logs.some((l) => /^tool get_account_overview by owner@example\.edu ok/.test(l)));
+    assert.ok(logs.some((l) => /^POST \/register 201 /.test(l)), 'request log shows full paths inside auth routes');
+    assert.ok(logs.some((l) => /^oauth: refused registration of "Claude" for redirect_uri https:\/\/evil\.example\/callback/.test(l)));
     assert.ok(!logs.some((l) => /gadst_|gadsr_|g-at-|g-rt-/.test(l)), 'no tokens in logs');
   });
 });
