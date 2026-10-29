@@ -1,0 +1,25 @@
+services:
+  google-ads-mcp:
+    build: .
+    image: google-ads-mcp:latest
+    container_name: google-ads-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+    # Only nginx on this host can reach it; nginx terminates HTTPS.
+    ports:
+      - "127.0.0.1:8790:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
