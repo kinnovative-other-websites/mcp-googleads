@@ -1,0 +1,101 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push waits for the running one instead of cancelling it.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: /opt/google-ads-mcp
+      PUBLIC_URL: https://mcpgoogle.k-innovative.com
+    steps:
+      - name: Check deploy secrets
+        id: check
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ] || [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ]; then
+            echo "::notice::Deploy skipped: add the DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS repository secrets."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.check.outputs.ready == 'true'
+
+      - name: Set up SSH
+        if: steps.check.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The server's host key is pinned, so the runner never trusts an unknown machine.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' \
+            "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+
+      - name: Upload code
+        if: steps.check.outputs.ready == 'true'
+        # .env lives only on the server and is never overwritten or deleted.
+        run: |
+          rsync -az --delete \
+            --exclude .git --exclude .github --exclude node_modules --exclude dist --exclude .env \
+            ./ "deploy:$DEPLOY_PATH/"
+
+      - name: Build and restart
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          ssh deploy "DEPLOY_PATH=$DEPLOY_PATH bash -s" <<'EOF'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          test -f .env || { echo "::error::$DEPLOY_PATH/.env is missing on the server"; exit 1; }
+          docker compose up -d --build --remove-orphans
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8790/healthz; then echo; docker image prune -f > /dev/null; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Container did not become healthy"
+          docker compose logs --tail 80
+          exit 1
+          EOF
+
+      - name: Check public endpoint
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          curl -fsS "$PUBLIC_URL/healthz"
+          echo
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PUBLIC_URL/mcp" -H 'content-type: application/json' -d '{}')
+          [ "$code" = "401" ] || { echo "::error::Expected 401 from unauthenticated /mcp, got $code"; exit 1; }

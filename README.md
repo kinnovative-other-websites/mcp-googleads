@@ -125,6 +125,23 @@ Claude is instructed to never claim it changed anything. It gives you step-by-st
   npm run check:gaql -- v27
   ```
 
+## Continuous deployment
+
+Every push to `main` runs the type check and tests in GitHub Actions. If they pass, the workflow deploys to the server: it copies the code with rsync into `/opt/google-ads-mcp`, rebuilds the container, waits for it to be healthy, then checks the public URL. Pull requests only run the tests.
+
+The settings file `.env` lives only on the server. Deploys never overwrite or delete it, so edit it there and run `docker compose up -d` to apply changes.
+
+The deploy job needs four repository secrets. Until they exist, the job is skipped with a notice.
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_HOST` | The server's IP address. |
+| `DEPLOY_USER` | `ubuntu` |
+| `DEPLOY_SSH_KEY` | Private key of a key pair used only for deploys. Its public key must be in the server's `~/.ssh/authorized_keys`. |
+| `DEPLOY_KNOWN_HOSTS` | The server's host key line, from `ssh-keyscan -t ed25519 <ip>` checked against a trusted login. |
+
+GitHub's runners connect from changing addresses, so the server's firewall must allow SSH from anywhere. Logins work with keys only.
+
 ## Development
 
 ```sh
